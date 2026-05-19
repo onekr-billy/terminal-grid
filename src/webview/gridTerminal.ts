@@ -110,14 +110,17 @@ function buildTheme(): ITheme {
 }
 
 function getTermFontFamily(): string {
-  if (fontFamilyOverride) return fontFamilyOverride;
-  const fallbacks = 'Menlo, Monaco, Consolas, "Cascadia Code", "JetBrains Mono", "Fira Code", "Courier New", monospace';
-  return (
-    ideFontFamily ||
+  const nerdFontFallbacks = '"MesloLGS NF", "Lekton Nerd Font", "DroidSansMono Nerd Font", "Meslo LG M DZ Nerd Font", "FiraCode NF", "JetBrainsMono NF", "Symbols Nerd Font Mono", "Symbols Nerd Font", "Powerline Symbols", "DejaVu Sans Mono for Powerline", "Source Code Pro for Powerline", "Menlo for Powerline"';
+  const standardFallbacks = 'Menlo, Monaco, Consolas, "Cascadia Code", "JetBrains Mono", "Fira Code", "Courier New", monospace';
+  const fallbacks = `${nerdFontFallbacks}, ${standardFallbacks}`;
+
+  if (fontFamilyOverride) return `${fontFamilyOverride}, ${fallbacks}`;
+  
+  const ideFont = ideFontFamily ||
     css("--vscode-terminal-fontFamily") ||
-    css("--vscode-editor-fontFamily") ||
-    fallbacks
-  );
+    css("--vscode-editor-fontFamily");
+    
+  return ideFont ? `${ideFont}, ${fallbacks}` : fallbacks;
 }
 
 function baseFontSize(): number {
@@ -491,6 +494,7 @@ window.addEventListener("message", (event) => {
     case "configUpdate":
       globalZoom = msg.zoom;
       fontFamilyOverride = msg.fontFamily;
+      if (msg.ideFontFamily !== undefined) ideFontFamily = msg.ideFontFamily;
       bgColorOverride = msg.bgColor || "";
       fgColorOverride = msg.fgColor || "";
       if (msg.themeName !== undefined) globalThemeName = msg.themeName;

@@ -627,13 +627,19 @@ export class TerminalGridPanel {
 
     // Watch for config changes
     this._configListener = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("terminalGrid")) {
+      if (e.affectsConfiguration("terminalGrid") || e.affectsConfiguration("terminal.integrated") || e.affectsConfiguration("editor")) {
         const cfg = vscode.workspace.getConfiguration("terminalGrid");
+        const tCfg = vscode.workspace.getConfiguration("terminal.integrated");
+        const eCfg = vscode.workspace.getConfiguration("editor");
+        
         const themeName = cfg.get<string>("colorTheme", "");
+        const ideFont = tCfg.get<string>("fontFamily") || eCfg.get<string>("fontFamily") || "";
+
         this._panel.webview.postMessage({
           type: "configUpdate",
           zoom: cfg.get<number>("zoomPercent", 100),
           fontFamily: cfg.get<string>("fontFamily", ""),
+          ideFontFamily: ideFont,
           bgColor: cfg.get<string>("backgroundColor", ""),
           fgColor: cfg.get<string>("foregroundColor", ""),
           themeName,
