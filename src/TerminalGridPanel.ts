@@ -109,6 +109,7 @@ export class TerminalGridPanel {
   private _csiUMode: boolean[] = [];            // Kitty keyboard protocol active per cell
   private _insideLlm: boolean[] = [];            // Cell is running an LLM CLI process
   private _cellShellType: string[] = [];          // Shell type per cell for EOL detection
+  private _cellStatus: ("idle" | "startup" | "active" | "error")[] = []; // Visual state per cell
   private static readonly OUTPUT_BUFFER_SIZE = 50000;
   private static readonly CSI_U_ENABLE = /\x1b\[>[0-9]+u/;
   private static readonly CSI_U_DISABLE = /\x1b\[<[0-9]*u/;
@@ -125,6 +126,12 @@ export class TerminalGridPanel {
       TerminalGridPanel._log = vscode.window.createOutputChannel("Terminal Grid");
     }
     return TerminalGridPanel._log;
+  }
+
+  private _updateCellStatus(id: number, status: "idle" | "startup" | "active" | "error") {
+    if (this._disposed) return;
+    this._cellStatus[id] = status;
+    this._panel.webview.postMessage({ type: "setStatus", id, status });
   }
 
 
@@ -774,6 +781,7 @@ export class TerminalGridPanel {
       this._insideLlm[id] = false;
       this._outputBuffers[id] = "";
       this._csiUMode[id] = false;
+      this._cellStatus[id] = "idle";
       let startupSent = false;
       pty.onData((data: string) => {
         if (!this._disposed) {
@@ -785,9 +793,14 @@ export class TerminalGridPanel {
             this._outputBuffers[id] = this._outputBuffers[id].slice(-TerminalGridPanel.OUTPUT_BUFFER_SIZE);
           }
           this._panel.webview.postMessage({ type: "output", id, data });
-          if (!startupSent && steps.length > 0) {
+          if (!startupSent) {
             startupSent = true;
-            this._executeSteps(id, steps, this._cellShellType[id] || "");
+            if (steps.length > 0) {
+              this._updateCellStatus(id, "startup");
+              this._executeSteps(id, steps, this._cellShellType[id] || "");
+            } else {
+              this._updateCellStatus(id, "active");
+            }
           }
         }
       });
@@ -840,6 +853,7 @@ export class TerminalGridPanel {
     let startupSent = false;
     this._outputBuffers[id] = "";
     this._csiUMode[id] = false;
+    this._cellStatus[id] = "idle";
 
     pty.onData((data: string) => {
       if (!this._disposed) {
@@ -851,9 +865,14 @@ export class TerminalGridPanel {
           this._outputBuffers[id] = this._outputBuffers[id].slice(-TerminalGridPanel.OUTPUT_BUFFER_SIZE);
         }
         this._panel.webview.postMessage({ type: "output", id, data });
-        if (!startupSent && steps.length > 0) {
+        if (!startupSent) {
           startupSent = true;
-          this._executeSteps(id, steps, this._cellShellType[id] || "");
+          if (steps.length > 0) {
+            this._updateCellStatus(id, "startup");
+            this._executeSteps(id, steps, this._cellShellType[id] || "");
+          } else {
+            this._updateCellStatus(id, "active");
+          }
         }
       }
     });
@@ -963,6 +982,7 @@ export class TerminalGridPanel {
         this._insideLlm[cellId] = insideLlm;
       }
     }
+    this._updateCellStatus(cellId, "active");
   }
 
   public restartCell(id: number): void {
@@ -1040,24 +1060,48 @@ export class TerminalGridPanel {
       grid-template-rows: repeat(${this._rows}, 1fr);
       grid-template-columns: repeat(${this._cols}, 1fr);
       width: 100%; height: 100%;
-      gap: 2px;
-      padding: 2px;
+      gap: 4px;
+      padding: 4px;
       position: relative;
     }
     .cell {
       overflow: hidden;
       contain: strict;
-      background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e));
-      border-radius: 6px;
-      border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.04));
+      background: var(--vscode-sideBar-background, var(--vscode-editor-background, #1e1e1e));
+      border-radius: 4px;
+      border: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border, rgba(255,255,255,0.04)));
       display: flex;
       flex-direction: column;
       position: relative;
-      transition: border-color 0.2s ease;
+      transition: all 0.2s ease;
+    }
+    .cell:hover {
+      border-color: var(--vscode-input-activeBorder, var(--vscode-focusBorder, #007fd4));
     }
     .cell.focused {
-      border-color: var(--vscode-focusBorder, rgba(0, 127, 212, 0.6));
-      box-shadow: 0 0 8px color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 25%, transparent);
+      border-color: var(--vscode-focusBorder, #007fd4);
+      box-shadow: 0 0 10px color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 30%, transparent);
+      z-index: 5;
+    }
+    .cell.status-startup {
+      background: linear-gradient(90deg, var(--vscode-sideBar-background) 0%, var(--vscode-progressBar-background) 50%, var(--vscode-sideBar-background) 100%);
+      background-size: 200% 100%;
+      animation: startup-pulse 2s infinite linear;
+    }
+    @keyframes startup-pulse {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .cell.status-error {
+      border-color: var(--vscode-errorForeground, #f48771) !important;
+    }
+    .cell.status-active .cell-label {
+      color: var(--vscode-charts-blue, #3794ff);
+      opacity: 0.8;
+    }
+    .cell.focused .cell-label {
+      opacity: 1;
+      color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground, #3794ff));
     }
     .cell-info {
       position: absolute;
@@ -1065,18 +1109,22 @@ export class TerminalGridPanel {
       display: flex; align-items: center; gap: 6px;
       font-size: 10px;
       font-family: var(--vscode-terminal-fontFamily, var(--vscode-editor-fontFamily, 'Menlo', 'Monaco', 'Consolas', monospace));
-      z-index: 1;
+      z-index: 10;
       pointer-events: none;
       user-select: none;
+      transition: opacity 0.2s ease;
+    }
+    .cell:not(.focused) .cell-info {
+      opacity: 0.7;
     }
     .cell-label {
-      color: var(--vscode-textLink-foreground, #3794ff);
-      opacity: 0.6;
+      color: var(--vscode-descriptionForeground, #3794ff);
+      font-weight: 600;
     }
     .cell-zoom-pct {
       font-size: 9px;
-      color: var(--vscode-textLink-foreground, #3794ff);
-      opacity: 0.7;
+      color: var(--vscode-descriptionForeground, #3794ff);
+      opacity: 0.6;
     }
     .grid-resizer {
       position: absolute;
@@ -1100,7 +1148,7 @@ export class TerminalGridPanel {
     .term-container {
       flex: 1;
       overflow: hidden;
-      padding: 4px 0 0 4px;
+      padding: 4px 4px 4px 4px;
       background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e));
     }
     .term-container .xterm,
@@ -1123,17 +1171,23 @@ export class TerminalGridPanel {
     .ctx-menu {
       position: fixed; display: none; z-index: 1000;
       background: var(--vscode-menu-background, #252526);
-      border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+      color: var(--vscode-menu-foreground, var(--vscode-foreground));
+      border: 1px solid var(--vscode-menu-border, rgba(255,255,255,.12));
+      border-radius: 4px;
       padding: 4px 0; min-width: 140px;
       box-shadow: 0 4px 20px rgba(0,0,0,.4);
+      user-select: none;
     }
     .ctx-menu.show { display: block; }
     .ctx-menu-item {
       padding: 6px 12px; font-size: 12px; cursor: pointer;
-      color: var(--vscode-menu-foreground, var(--vscode-foreground));
+      color: inherit;
       transition: background .1s;
     }
-    .ctx-menu-item:hover { background: rgba(255,255,255,.06); }
+    .ctx-menu-item:hover {
+      background: var(--vscode-menu-selectionBackground, rgba(255,255,255,.06));
+      color: var(--vscode-menu-selectionForeground, inherit);
+    }
     .ctx-menu-sep { height: 1px; background: rgba(255,255,255,.06); margin: 4px 8px; }
   </style>
 </head>

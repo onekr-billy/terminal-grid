@@ -243,6 +243,9 @@ for (let i = 0; i < total; i++) {
   terminal.textarea?.addEventListener("focus", () => cellDiv.classList.add("focused"));
   terminal.textarea?.addEventListener("blur", () => cellDiv.classList.remove("focused"));
 
+  cellDiv.addEventListener("mouseenter", () => cellDiv.classList.add("hovered"));
+  cellDiv.addEventListener("mouseleave", () => cellDiv.classList.remove("hovered"));
+
   const cell: Cell = { terminal, fitAddon, el: cellDiv, zoom: 100, zoomLabel, labelEl: label };
   cells.push(cell);
 
@@ -460,6 +463,14 @@ function applyCellBgOverride(cell: Cell, bg: string): void {
 window.addEventListener("message", (event) => {
   const msg = event.data;
   switch (msg.type) {
+    case "setStatus": {
+      const cell = cells[msg.id];
+      if (cell) {
+        cell.el.classList.remove("status-idle", "status-startup", "status-active", "status-error");
+        cell.el.classList.add(`status-${msg.status}`);
+      }
+      break;
+    }
     case "output":
       cells[msg.id]?.terminal.write(msg.data);
       break;
